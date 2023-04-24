@@ -2,18 +2,18 @@
 进程间通信（InterProcess Communication, 简称IPC），是指在不同进程之间交换或传递数据。
 <br>以Linux系统为例。
 
-## 方式一：无名管道(pipe)
+## 方式一：无名管道（pipe）
 无名管道用于从父进程向子进程**单向**传递数据。
 在Linux系统的<unistd.h>头文件中，定义了用于开启一个无名管道的函数`pipe()`。
 函数原型如下：
-```
+```c++
 int pipe(int* ___pipedes);
 ```
 这里的pipedes地址，需要传入的实际上是一个2位大小的int型数组地址。我们假设这个数组为`pipe_fd[2]`，那么`pipe_fd[0]`是管道读取端的文件标识符，`pipe_fd[1]`是管道写入端的文件标识符。
 <br><br>
 以下是一个程序示例。在这个示例中，由该程序通过调用fork()函数创建出一个自身的副本，这个副本会作为该程序所属进程的子进程而存在。
 
-``` unnamed_pipe.cpp
+```c++
 #include <iostream>
 #include <unistd.h>
 int main()
@@ -46,3 +46,102 @@ int main()
     return 0;
 }
 ```
+
+## 方式二：有名管道（FIFO）
+FIFO用于在两个没有联系的进程之间**单向**地传递数据。<br>
+在开启FIFO通信之后，Linux会在硬盘中开启一个特殊的**文件**用于进行FIFO通信。<br>
+也就是说，FIFO的本质就是系统给两个进程建立了一个文件，写进程在文件里写数据，读进程在文件里读取数据。<br>
+<br>这里有一个程序，这个程序的作用是建立一个FIFO文件（即开启一个FIFO有名管道）。
+```c++
+#include <sys/stat.h>
+#include <stdio.h>
+int main()
+{
+    if(mkfifo("data/fifotest", 0666) != 0)
+    {
+        printf("FIFO有名管道创建失败！\n");
+    }
+    return 0;
+}
+```
+注意这一个语句：
+```c++
+mkfifo("data/fifotest", 0666);
+```
+这个函数存在于<sys/stat.h>头文件内。函数定义如下：
+```c
+int mkfifo (const char *__path, __mode_t __mode)
+```
+两个传入参数，前一个是FIFO文件的存放路径，后一个是该文件的八进制权限（类型是unsigned int）。<br>另外，mkfifo本身也是一个Linux命令，可以通过命令的方式建立FIFO文件，但是在这里不展开。<br><br>
+一个FIFO文件创建之后，需要被两个进程打开，其中一个进程以读取形式打开，另外一个进程以写入形式打开。
+<br>默认情况下，在其中一个进程通过调用open函数打开FIFO文件之后，程序会阻塞，直到FIFO的另一端也调用了open函数打开了FIFO。但是在open函数中，可以通过调整函数输入参数来进行非阻塞的操作。
+<br>open函数需要两个传入参数，前一个是文件位置，后一个是打开参数。
+<br>在这里，对应FIFO类型文件有几种打开参数：
+```
+O_WRONLY：阻塞式写入（Write only）
+O_RDONLY：阻塞式读取（Read only）
+O_WRONLY | O_NONBLOCK：非阻塞式写入（Write only | Non_block）
+O_RDONLY | O_NONBLOCK：非阻塞式读取（Read only | Non_block）
+```
+<br>
+下面是一个例子。
+<br>写入端：
+```c++
+#include <cstdio>
+#include <sys/stat.h>
+#include <fcntl.h>  // File Control Operations
+#include <stdlib.h>
+#include <unistd.h>
+int main()
+{
+    int fd;
+    char buffer[1024] = "Hi there, this is DYY sending a mail via a FIFO.";
+    
+    if((fd = open("data/fifotest", O_WRONLY)) < 0)
+    {
+        printf("尝试打开文件FIFO文件失败！是否没有运行打开FIFO的程序？\n");
+        exit(1);
+    }
+
+    if(write(fd, buffer, 48) < 0)   // 通过write函数向文件中写入。
+    // 三个传入参数，第一个是文件描述符（这里的文件描述符应该指向FIFO文件），第二个是要写入的字符串，第三个是写入长度。
+    {
+        printf("写入管道失败。\n");
+        close(fd);
+        exit(2);
+    }
+    // sleep(2);
+    close(fd);
+    return 0;
+}
+```
+读取端：
+```c++
+#include <unistd.h>
+#include <sys/stat.h>
+#include <stdlib.h>
+#include <fcntl.h>
+#include <cstdio>
+int main()
+{
+    int fd;
+    char buffer[1024] = {0};
+    if((fd = open("data/fifotest", O_RDONLY)) < 0)
+    {
+        printf("打开FIFO失败。\n");
+        exit(1);
+    }
+    if(read(fd, buffer, 49) < 0)    // 通过read函数从文件中读出数据。
+    // 三个传入参数，第一个是文件描述符（此处应该指向FIFO文件），第二个是存储读取到的数据的存储字符串，第三个是读取最大长度。
+    {
+        printf("读取FIFO数据失败！");
+        close(fd);
+        exit(2);
+    }
+    printf("%s\n", buffer);
+    // sleep(2);
+    close(fd);
+    return 0;
+}
+```
+在运行这两个程序之前，首先先创建FIFO文件，然后依次运行这两个程序。
