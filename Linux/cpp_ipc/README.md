@@ -83,7 +83,6 @@ O_RDONLY：阻塞式读取（Read only）
 O_WRONLY | O_NONBLOCK：非阻塞式写入（Write only | Non_block）
 O_RDONLY | O_NONBLOCK：非阻塞式读取（Read only | Non_block）
 ```
-<br>
 下面是一个例子。
 <br>写入端：
 ```c++
