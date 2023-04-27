@@ -155,3 +155,128 @@ Hi there, this is DYY sending a mail via a FIFO.
 ## 方式三：消息队列
 消息队列是存在于内核中的IPC机制，本质上是存储在内核中的一张链表。
 <br>消息队列独立于读程序和写程序而存在。不像之前的管道必须要依附于两个进程才能发挥作用，消息队列是解耦合于任何程序的。写程序只需要向消息队列里面扔消息，扔进去就可以跑了；读程序只需要从消息队列里面拿数据，不用等写程序往里面扔。
+<br><br>需要注意的是，经过实验，发送和接收消息需要root权限。
+<br><br>消息队列中，一个消息以一个结构体类型的形式存在。这个结构体的形式如下：
+```c
+struct msg_buf  // 用于投入队列的消息格式，是一个结构体
+{
+    long mtype; // 第一个成员是消息的类型
+    char mtext[];    // 第二个成员是消息的内容
+};
+```
+在读写消息的时候，发送端会以这种形式传输自己的消息，接收端以这种形式解读传过来的数据。
+
+这里有一个简单的例子，两个进程之间会做两次握手。
+<br>发送端：
+```c++
+// 消息队列进程发送端
+#include <iostream>
+#include <sys/msg.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <string.h>
+struct msg_buf  // 用于投入队列的消息格式，是一个结构体
+{
+    long mtype; // 第一个成员是消息的类型
+    char mtext[256];    // 第二个成员是消息的内容
+};
+
+int main()
+{
+    msg_buf buffer;
+    int msg_iden = msgget(114514, IPC_CREAT);   // 创建消息队列
+    if(msg_iden == -1)
+    {
+        std::cout << "消息队列创建失败！程序即将退出。" << std::endl;
+        exit(1);
+    }
+
+    buffer.mtype = 114; // 设置所要发送的消息类型是114
+    for(int i = 0; i < 256; i++)
+    {
+        buffer.mtext[i] = 0;
+    }
+    sprintf(buffer.mtext, "Hi there, this is DYY sending a mail via a message queue through client %d.", getpid());
+    
+    if(msgsnd(msg_iden, &buffer, strlen(buffer.mtext), 0) == -1)    // 发送消息
+    {
+        std::cout << "消息发送失败。" << std::endl;
+        exit(2);
+    }
+
+    int recv_length = msgrcv(msg_iden, &buffer, 256, 514, 0);   // 接收返回的消息
+    if(recv_length == -1)
+    {
+        std::cout << "回信接收失败。" << std::endl;
+        exit(3);
+    }
+    else
+    {
+        std::cout << "接收到来自另一端的回信：" << std::endl << buffer.mtext << std::endl;
+    }
+    return 0;
+}
+```
+接收端：
+```c++
+// 消息队列进程接收端
+#include <iostream>
+#include <sys/msg.h>
+#include <stdlib.h>
+#include <string.h>
+struct msg_buf  // 用于投入队列的消息格式，是一个结构体
+{
+    long mtype; // 第一个成员是消息的类型
+    char mtext[256];    // 第二个成员是消息的内容
+};
+
+int main()
+{
+    msg_buf buffer;
+    int msg_iden = msgget(114514, IPC_CREAT);   // 创建消息队列
+    if(msg_iden == -1)
+    {
+        std::cout << "消息队列创建失败！程序即将退出。" << std::endl;
+        exit(1);
+    }
+
+    int recv_stat = msgrcv(msg_iden, &buffer, 256, 114, 0);
+    if(recv_stat == -1)
+    {
+        std::cout << "消息接收错误。" << std::endl;
+        exit(2);
+    }
+    else
+    {
+        std::cout << "接收到来自发送端的消息：" << std::endl;
+        std::cout << buffer.mtext << std::endl;
+    }
+    
+    memset(buffer.mtext, 0, 256);
+    buffer.mtype = 514;
+    strcpy(buffer.mtext, "Roger. Now replying.");
+    if(msgsnd(msg_iden, &buffer, sizeof(buffer.mtext), 0) == -1)
+    {
+        std::cout << "回信接收失败。" << std::endl;
+        exit(3);
+    }
+    else
+    {
+        std::cout << "对方接收已确认。" << std::endl;
+    }
+    return 0;
+}
+```
+发送进程的显示内容如下：
+```
+接收到来自另一端的回信：
+Roger. Now replying.
+```
+接收进程的显示内容如下：
+```
+接收到来自发送端的消息：
+Hi there, this is DYY sending a mail via a message queue through client 2244.
+对方接收已确认。
+```
+下面来详细讲这两个程序里用到的消息队列相关的API和参数。再次提醒，调用这些API需要使用root权限。
